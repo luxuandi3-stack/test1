@@ -2,206 +2,370 @@
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
 
-// Score elements
-const playerScoreDisplay = document.getElementById('playerScore');
-const computerScoreDisplay = document.getElementById('computerScore');
+// UI Elements
+const scoreDisplay = document.getElementById('score');
+const birdsLeftDisplay = document.getElementById('birdsLeft');
+const levelDisplay = document.getElementById('level');
+const gameOverModal = document.getElementById('gameOver');
+const gameOverTitle = document.getElementById('gameOverTitle');
+const gameOverMessage = document.getElementById('gameOverMessage');
+const finalScoreDisplay = document.getElementById('finalScore');
 
-// Game objects
-const paddle = {
-    width: 15,
-    height: 90,
-    speed: 6,
-    x: 10,
-    y: canvas.height / 2 - 45
+// Game Variables
+let score = 0;
+let birdsLeft = 3;
+let currentLevel = 1;
+let gameState = 'aiming'; // 'aiming', 'launched', 'levelComplete', 'gameOver'
+let gameRunning = true;
+
+// Physics
+const gravity = 0.5;
+const damping = 0.99;
+const friction = 0.98;
+
+// Bird Object
+const bird = {
+    x: 100,
+    y: canvas.height - 100,
+    vx: 0,
+    vy: 0,
+    radius: 15,
+    dragging: false,
+    launched: false,
+    active: true
 };
 
-const computer = {
-    width: 15,
-    height: 90,
-    speed: 4,
-    x: canvas.width - 25,
-    y: canvas.height / 2 - 45
+// Slingshot
+const slingshot = {
+    x: 100,
+    y: canvas.height - 100,
+    radius: 20
 };
 
-const ball = {
-    x: canvas.width / 2,
-    y: canvas.height / 2,
-    radius: 7,
-    speedX: 5,
-    speedY: 5,
-    maxSpeed: 8
-};
+// Mouse position
+let mouse = { x: 0, y: 0 };
+let aimLine = { x1: 0, y1: 0, x2: 0, y2: 0 };
 
-// Game variables
-let playerScore = 0;
-let computerScore = 0;
-let gameRunning = false;
-let keys = {};
+// Pigs array
+let pigs = [];
 
-// Mouse position for player control
-let mouseY = canvas.height / 2;
+// Platforms/Blocks
+let blocks = [];
 
-// Event listeners
-document.addEventListener('keydown', (e) => {
-    keys[e.key] = true;
-    if (e.key === ' ') {
-        e.preventDefault();
-        gameRunning = !gameRunning;
-    }
-});
-
-document.addEventListener('keyup', (e) => {
-    keys[e.key] = false;
-});
-
+// Event Listeners
 document.addEventListener('mousemove', (e) => {
     const rect = canvas.getBoundingClientRect();
-    mouseY = e.clientY - rect.top;
+    mouse.x = e.clientX - rect.left;
+    mouse.y = e.clientY - rect.top;
+
+    if (bird.dragging && gameState === 'aiming') {
+        bird.x = Math.max(50, Math.min(mouse.x, 150));
+        bird.y = Math.max(canvas.height - 150, Math.min(mouse.y, canvas.height - 50));
+    }
 });
 
+document.addEventListener('mousedown', (e) => {
+    const rect = canvas.getBoundingClientRect();
+    const mouseX = e.clientX - rect.left;
+    const mouseY = e.clientY - rect.top;
+
+    const dist = Math.hypot(mouseX - bird.x, mouseY - bird.y);
+    if (dist < bird.radius * 2 && gameState === 'aiming' && bird.active) {
+        bird.dragging = true;
+    }
+});
+
+document.addEventListener('mouseup', () => {
+    if (bird.dragging && gameState === 'aiming') {
+        bird.dragging = false;
+        bird.vx = (slingshot.x - bird.x) * 0.15;
+        bird.vy = (slingshot.y - bird.y) * 0.15;
+        bird.launched = true;
+        bird.active = false;
+        gameState = 'launched';
+    }
+});
+
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'r' || e.key === 'R') {
+        resetLevel();
+    }
+    if (e.key === ' ') {
+        nextLevel();
+    }
+});
+
+// Initialize Level
+function initLevel() {
+    pigs = [];
+    blocks = [];
+    bird.x = 100;
+    bird.y = canvas.height - 100;
+    bird.vx = 0;
+    bird.vy = 0;
+    bird.launched = false;
+    bird.active = true;
+    gameState = 'aiming';
+
+    // Create pigs based on level
+    const pigCount = 3 + currentLevel;
+    for (let i = 0; i < pigCount; i++) {
+        pigs.push({
+            x: 600 + Math.random() * 250,
+            y: canvas.height - 100 - Math.random() * 150,
+            radius: 12,
+            health: 1,
+            vx: 0,
+            vy: 0
+        });
+    }
+
+    // Create blocks
+    const blockRows = 2 + Math.floor(currentLevel / 2);
+    for (let row = 0; row < blockRows; row++) {
+        for (let col = 0; col < 3; col++) {
+            blocks.push({
+                x: 600 + col * 60,
+                y: canvas.height - 150 - row * 60,
+                width: 50,
+                height: 50,
+                health: 1,
+                vx: 0,
+                vy: 0,
+                rotation: 0
+            });
+        }
+    }
+}
+
 // Draw functions
-function drawPaddle(x, y) {
-    ctx.fillStyle = '#667eea';
-    ctx.fillRect(x, y, paddle.width, paddle.height);
-    ctx.shadowColor = '#667eea';
-    ctx.shadowBlur = 10;
-    ctx.fillRect(x, y, paddle.width, paddle.height);
-    ctx.shadowBlur = 0;
+function drawBird() {
+    ctx.save();
+    ctx.fillStyle = '#FF6B35';
+    ctx.beginPath();
+    ctx.arc(bird.x, bird.y, bird.radius, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Eye
+    ctx.fillStyle = '#000';
+    ctx.beginPath();
+    ctx.arc(bird.x + 5, bird.y - 3, 4, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
 }
 
-function drawBall() {
-    ctx.fillStyle = '#fff';
+function drawSlingshot() {
+    ctx.strokeStyle = '#8B4513';
+    ctx.lineWidth = 6;
     ctx.beginPath();
-    ctx.arc(ball.x, ball.y, ball.radius, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.shadowColor = '#fff';
-    ctx.shadowBlur = 15;
-    ctx.fill();
-    ctx.shadowBlur = 0;
-}
-
-function drawNet() {
-    ctx.strokeStyle = '#444';
-    ctx.setLineDash([10, 10]);
-    ctx.beginPath();
-    ctx.moveTo(canvas.width / 2, 0);
-    ctx.lineTo(canvas.width / 2, canvas.height);
+    ctx.moveTo(slingshot.x - 15, slingshot.y - 40);
+    ctx.lineTo(slingshot.x, slingshot.y);
     ctx.stroke();
-    ctx.setLineDash([]);
+
+    ctx.beginPath();
+    ctx.moveTo(slingshot.x + 15, slingshot.y - 40);
+    ctx.lineTo(slingshot.x, slingshot.y);
+    ctx.stroke();
+
+    // Base
+    ctx.fillStyle = '#8B4513';
+    ctx.fillRect(slingshot.x - 30, slingshot.y, 60, 20);
 }
 
+function drawPigs() {
+    pigs.forEach(pig => {
+        ctx.save();
+        ctx.translate(pig.x, pig.y);
+        ctx.fillStyle = '#90EE90';
+        ctx.beginPath();
+        ctx.arc(0, 0, pig.radius, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Eyes
+        ctx.fillStyle = '#000';
+        ctx.beginPath();
+        ctx.arc(-5, -3, 3, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(5, -3, 3, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+    });
+}
+
+function drawBlocks() {
+    blocks.forEach(block => {
+        ctx.save();
+        ctx.translate(block.x, block.y);
+        ctx.rotate(block.rotation);
+        ctx.fillStyle = '#CD853F';
+        ctx.fillRect(-block.width / 2, -block.height / 2, block.width, block.height);
+        ctx.strokeStyle = '#8B4513';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(-block.width / 2, -block.height / 2, block.width, block.height);
+        ctx.restore();
+    });
+}
+
+function drawAimLine() {
+    if (bird.dragging && gameState === 'aiming') {
+        const dist = Math.hypot(bird.x - slingshot.x, bird.y - slingshot.y);
+        const angle = Math.atan2(bird.y - slingshot.y, bird.x - slingshot.x);
+
+        ctx.strokeStyle = 'rgba(255, 0, 0, 0.7)';
+        ctx.lineWidth = 3;
+        ctx.setLineDash([5, 5]);
+        ctx.beginPath();
+        ctx.moveTo(slingshot.x, slingshot.y);
+        ctx.lineTo(slingshot.x + Math.cos(angle) * dist * 1.5, slingshot.y + Math.sin(angle) * dist * 1.5);
+        ctx.stroke();
+        ctx.setLineDash([]);
+    }
+}
+
+function drawScore() {
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 20px Arial';
+    ctx.fillText(`Score: ${score}`, 20, 30);
+}
+
+// Physics update
+function updateBird() {
+    if (bird.launched && bird.active) {
+        bird.vy += gravity;
+        bird.x += bird.vx;
+        bird.y += bird.vy;
+
+        bird.vx *= damping;
+        bird.vy *= damping;
+
+        // Stop bird if it's slow and low
+        if (Math.hypot(bird.vx, bird.vy) < 0.5 && bird.y > canvas.height - 50) {
+            bird.active = false;
+            birdsLeft--;
+            birdsLeftDisplay.textContent = birdsLeft;
+            if (birdsLeft <= 0 && pigs.length > 0) {
+                endGame();
+            } else {
+                setTimeout(() => {
+                    if (gameState !== 'levelComplete' && gameState !== 'gameOver') {
+                        initLevel();
+                    }
+                }, 500);
+            }
+        }
+
+        // Boundary check
+        if (bird.x > canvas.width || bird.y > canvas.height) {
+            bird.active = false;
+            birdsLeft--;
+            birdsLeftDisplay.textContent = birdsLeft;
+            if (birdsLeft <= 0 && pigs.length > 0) {
+                endGame();
+            } else {
+                setTimeout(() => {
+                    if (gameState !== 'levelComplete' && gameState !== 'gameOver') {
+                        initLevel();
+                    }
+                }, 500);
+            }
+        }
+    }
+}
+
+// Collision detection
+function checkCollisions() {
+    // Bird vs Pigs
+    pigs.forEach((pig, pigIndex) => {
+        const dist = Math.hypot(bird.x - pig.x, bird.y - pig.y);
+        if (dist < bird.radius + pig.radius && bird.active) {
+            pigs.splice(pigIndex, 1);
+            score += 100;
+            scoreDisplay.textContent = score;
+        }
+    });
+
+    // Bird vs Blocks
+    blocks.forEach((block, blockIndex) => {
+        if (circleRectCollision(bird, block) && bird.active) {
+            block.health -= 1;
+            bird.vx *= -0.5;
+            bird.vy *= -0.5;
+            if (block.health <= 0) {
+                blocks.splice(blockIndex, 1);
+                score += 50;
+                scoreDisplay.textContent = score;
+            }
+        }
+    });
+
+    // Check level complete
+    if (pigs.length === 0 && gameState === 'launched') {
+        gameState = 'levelComplete';
+        setTimeout(nextLevel, 1000);
+    }
+}
+
+function circleRectCollision(circle, rect) {
+    const closestX = Math.max(rect.x - rect.width / 2, Math.min(circle.x, rect.x + rect.width / 2));
+    const closestY = Math.max(rect.y - rect.height / 2, Math.min(circle.y, rect.y + rect.height / 2));
+    const dist = Math.hypot(circle.x - closestX, circle.y - closestY);
+    return dist < circle.radius;
+}
+
+// Draw game
 function drawGame() {
-    // Clear canvas
-    ctx.fillStyle = '#1a1a2e';
+    // Background
+    ctx.fillStyle = '#87ceeb';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    // Draw net
-    drawNet();
+    // Ground
+    ctx.fillStyle = '#90EE90';
+    ctx.fillRect(0, canvas.height - 50, canvas.width, 50);
 
-    // Draw paddles
-    drawPaddle(paddle.x, paddle.y);
-    drawPaddle(computer.x, computer.y);
+    // Draw elements
+    drawBlocks();
+    drawPigs();
+    drawSlingshot();
+    drawBird();
+    drawAimLine();
+    drawScore();
 
-    // Draw ball
-    drawBall();
+    // Level info
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 16px Arial';
+    ctx.fillText(`Level: ${currentLevel}`, canvas.width - 150, 30);
+    ctx.fillText(`Birds: ${birdsLeft}`, canvas.width - 150, 55);
 }
 
-// Update functions
-function updatePlayerPaddle() {
-    // Mouse control
-    if (mouseY - paddle.height / 2 !== paddle.y) {
-        const targetY = Math.max(0, Math.min(mouseY - paddle.height / 2, canvas.height - paddle.height));
-        paddle.y = targetY;
-    }
-
-    // Arrow keys control
-    if (keys['ArrowUp']) {
-        paddle.y = Math.max(0, paddle.y - paddle.speed);
-    }
-    if (keys['ArrowDown']) {
-        paddle.y = Math.min(canvas.height - paddle.height, paddle.y + paddle.speed);
-    }
-}
-
-function updateComputerPaddle() {
-    const computerCenter = computer.y + computer.height / 2;
-    const ballCenter = ball.y;
-    const difficulty = 0.15; // Reaction time
-
-    if (computerCenter < ballCenter - difficulty) {
-        computer.y = Math.min(canvas.height - computer.height, computer.y + computer.speed);
-    } else if (computerCenter > ballCenter + difficulty) {
-        computer.y = Math.max(0, computer.y - computer.speed);
-    }
-}
-
-function updateBall() {
-    if (!gameRunning) return;
-
-    ball.x += ball.speedX;
-    ball.y += ball.speedY;
-
-    // Wall collision (top and bottom)
-    if (ball.y - ball.radius < 0 || ball.y + ball.radius > canvas.height) {
-        ball.speedY = -ball.speedY;
-        ball.y = ball.y - ball.radius < 0 ? ball.radius : canvas.height - ball.radius;
-    }
-
-    // Paddle collision (player)
-    if (
-        ball.x - ball.radius < paddle.x + paddle.width &&
-        ball.y > paddle.y &&
-        ball.y < paddle.y + paddle.height &&
-        ball.speedX < 0
-    ) {
-        ball.speedX = -ball.speedX;
-        const collidePoint = ball.y - (paddle.y + paddle.height / 2);
-        collidePoint < 0 ? (ball.speedY = collidePoint * 0.1) : (ball.speedY = collidePoint * 0.1);
-        ball.x = paddle.x + paddle.width + ball.radius;
-    }
-
-    // Paddle collision (computer)
-    if (
-        ball.x + ball.radius > computer.x &&
-        ball.y > computer.y &&
-        ball.y < computer.y + computer.height &&
-        ball.speedX > 0
-    ) {
-        ball.speedX = -ball.speedX;
-        const collidePoint = ball.y - (computer.y + computer.height / 2);
-        collidePoint < 0 ? (ball.speedY = collidePoint * 0.1) : (ball.speedY = collidePoint * 0.1);
-        ball.x = computer.x - ball.radius;
-    }
-
-    // Score points
-    if (ball.x - ball.radius < 0) {
-        computerScore++;
-        computerScoreDisplay.textContent = computerScore;
-        resetBall();
-    }
-    if (ball.x + ball.radius > canvas.width) {
-        playerScore++;
-        playerScoreDisplay.textContent = playerScore;
-        resetBall();
-    }
-}
-
-function resetBall() {
-    ball.x = canvas.width / 2;
-    ball.y = canvas.height / 2;
-    ball.speedX = (Math.random() > 0.5 ? 1 : -1) * 5;
-    ball.speedY = (Math.random() - 0.5) * 6;
-    gameRunning = false;
-}
-
-// Main game loop
+// Game loop
 function gameLoop() {
-    updatePlayerPaddle();
-    updateComputerPaddle();
-    updateBall();
+    updateBird();
+    checkCollisions();
     drawGame();
     requestAnimationFrame(gameLoop);
 }
 
-// Start the game
+// Level functions
+function resetLevel() {
+    initLevel();
+    gameState = 'aiming';
+}
+
+function nextLevel() {
+    currentLevel++;
+    levelDisplay.textContent = currentLevel;
+    initLevel();
+}
+
+function endGame() {
+    gameState = 'gameOver';
+    gameOverTitle.textContent = '🎮 Game Over!';
+    gameOverMessage.textContent = `Final Score: ${score}`;
+    finalScoreDisplay.textContent = score;
+    gameOverModal.classList.remove('hidden');
+}
+
+// Start game
+initLevel();
 gameLoop();
